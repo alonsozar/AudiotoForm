@@ -23,32 +23,21 @@ st.markdown("""
         font-family: 'Heebo', sans-serif;
     }
 
-    /* יישור לימין - בצורה חכמה שלא שוברת את המובייל */
+    /* יישור לימין */
     .stApp {
         background-color: #f8f9fa;
         direction: rtl; 
         text-align: right;
     }
 
-    /* תיקון ספציפי למובייל (מסכים צרים) */
+    /* תיקון ספציפי למובייל */
     @media only screen and (max-width: 600px) {
-        /* ביטול כפיית RTL על אלמנטים מסוימים שנשברים */
         .stTextInput > div > div > input {
             direction: rtl; 
         }
-        /* הקטנת כותרות כדי שלא יחרגו מהמסך */
         h1 { font-size: 1.8rem !important; }
         h2 { font-size: 1.4rem !important; }
-        h3 { font-size: 1.2rem !important; }
         
-        /* ריווח טוב יותר בצדדים */
-        .block-container {
-            padding-left: 1rem !important;
-            padding-right: 1rem !important;
-            padding-top: 2rem !important;
-        }
-        
-        /* התאמת כפתורים למסך מלא */
         div.stButton > button {
             width: 100% !important;
         }
@@ -77,11 +66,9 @@ st.markdown("""
         box-shadow: 0 6px 8px rgba(0,0,0,0.15);
     }
 
-    /* הסתרת אלמנטים מיותרים */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     
-    /* עיצוב שדות קלט */
     .stTextInput input, .stTextArea textarea {
         border-radius: 8px !important;
         border: 1px solid #e0e0e0;
@@ -89,18 +76,17 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- סרגל צד (Sidebar) ---
+# --- סרגל צד ---
 with st.sidebar:
     st.title("⚙️ הגדרות מערכת")
     
     st.markdown("### 📄 תבנית מסמך")
-    st.info("ניתן להעלות תבנית Word מותאמת אישית. אם לא תועלה תבנית, המערכת תשתמש בתבנית ברירת המחדל.")
+    st.info("ניתן להעלות תבנית Word מותאמת אישית.")
     template_file = st.file_uploader("העלה תבנית (.docx)", type=["docx"])
     
     st.markdown("---")
     
     st.markdown("### 🎯 שדות לחילוץ")
-    # הגדרת הסכמה (Schema) - המפתחות באנגלית לטובת הקוד, התיאור בעברית לטובת ה-AI
     default_schema = """
     {
         "client_name": "שם הלקוח המלא",
@@ -113,7 +99,6 @@ with st.sidebar:
     schema = st.text_area("הגדרת JSON:", value=default_schema, height=250)
 
 # --- מסך ראשי ---
-# כותרת ראשית
 col_logo, col_title = st.columns([1, 5])
 with col_logo:
     st.markdown("## ⚖️") 
@@ -123,7 +108,6 @@ with col_title:
 
 st.markdown("---")
 
-# בחירה בין העלאה להקלטה
 tab_upload, tab_record = st.tabs(["📁 העלאת קובץ", "🎙️ הקלטה חיה"])
 
 audio_file = None
@@ -144,10 +128,8 @@ if audio_file is not None:
     st.markdown("### 🎧 האזנה וניתוח")
     st.audio(audio_file, format="audio/wav")
     
-    # כפתור הפעלה ראשי
     if st.button("🚀 הפעל ניתוח AI", use_container_width=True):
         
-        # אזור סטטוס מעוצב
         with st.status("🤖 המערכת מעבדת את הנתונים...", expanded=True) as status:
             st.write("📝 מתמלל את השיחה לטקסט...")
             transcribed_text = transcribe_audio(audio_file)
@@ -159,11 +141,9 @@ if audio_file is not None:
             
             status.update(label="תהליך העיבוד הושלם בהצלחה!", state="complete", expanded=False)
 
-        # הצגת התמלול
         with st.expander("📄 הצג תמלול מלא של השיחה"):
             st.info(transcribed_text)
 
-        # בדיקת שגיאות
         if "error" in extracted_data:
             st.error(f"שגיאה בחילוץ הנתונים: {extracted_data['error']}")
         else:
@@ -171,13 +151,54 @@ if audio_file is not None:
             st.subheader("✏️ בדיקת נתונים לפני יצירת מסמך")
             st.caption("ניתן לערוך את השדות ידנית לפני ההורדה")
             
-            # טופס עריכה דינמי
             edited_data = {}
             
-            # מילון תרגום למשתמש (כדי שיראה עברית ולא מפתחות באנגלית)
+            # --- התיקון נמצא כאן ---
             labels = {
                 "client_name": "שם הלקוח",
                 "id_number": "תעודת זהות",
                 "event_date": "תאריך אירוע",
                 "main_complaint": "תיאור המקרה",
-                "requested_re
+                "requested_remedy": "סעד מבוקש"
+            }
+            
+            for key, value in extracted_data.items():
+                label = labels.get(key, key)
+                if len(str(value)) > 50:
+                    edited_data[key] = st.text_area(label, value)
+                else:
+                    edited_data[key] = st.text_input(label, value)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # בחירת תבנית
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            default_template_path = os.path.join(current_dir, "default_template.docx")
+
+            final_doc = None
+            filename = "document.docx"
+
+            if template_file:
+                st.toast("משתמש בתבנית שהעלית...", icon="📂")
+                final_doc = fill_template(template_file, edited_data)
+                filename = "custom_legal_form.docx"
+            
+            elif os.path.exists(default_template_path):
+                st.info("משתמש בתבנית ברירת מחדל (דמו).")
+                final_doc = fill_template(default_template_path, edited_data)
+                filename = "legal_case_draft.docx"
+                
+            else:
+                st.warning("לא נמצאה תבנית - יוצר מסמך נתונים בסיסי.")
+                final_doc = create_docx(edited_data)
+                filename = "generic_data.docx"
+
+            if final_doc:
+                st.download_button(
+                    label="📥 הורד מסמך מוכן (Word)",
+                    data=final_doc,
+                    file_name=filename,
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    type="primary",
+                    use_container_width=True
+                )
