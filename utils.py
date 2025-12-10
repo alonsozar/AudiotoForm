@@ -1,58 +1,58 @@
+from docxtpl import DocxTemplate
 from docx import Document
 from io import BytesIO
 
+def fill_template(template_file, data):
+    """
+    ממלא תבנית Word קיימת באמצעות ספריית docxtpl (Jinja2).
+    שומר על העיצוב המקורי של הטופס בצורה מושלמת.
+    """
+    try:
+        # טעינת התבנית מהקובץ שהועלה או מהנתיב המקומי
+        doc = DocxTemplate(template_file)
+        
+        # הכנת הנתונים (Context)
+        # הספרייה מצפה למילון פשוט. היא תחפש {{ key }} בתוך הוורד
+        context = data
+        
+        # ביצוע הרינדור (החלפת המשתנים בערכים)
+        doc.render(context)
+        
+        # שמירה לזיכרון (Buffer) כדי לא לשמור קובץ פיזי בשרת
+        buffer = BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+        
+        return buffer
+        
+    except Exception as e:
+        # במקרה של תקלה (למשל התבנית לא תקינה), נחזיר הודעת שגיאה או מסמך ריק
+        print(f"Error filling template: {e}")
+        return None
+
 def create_docx(data):
     """
-    יוצר מסמך חדש מאפס (גיבוי למקרה שאין תבנית).
+    פונקציית גיבוי: יוצרת מסמך פשוט מאפס אם אין תבנית.
+    שימושי למקרה שהמשתמש לא העלה תבנית ורוצה רק לראות את הנתונים.
     """
     doc = Document()
-    doc.add_heading('סיכום תיק אוטומטי', 0)
+    doc.add_heading('סיכום תיק - נתונים גולמיים', 0)
     
     table = doc.add_table(rows=1, cols=2)
     table.style = 'Table Grid'
     hdr_cells = table.rows[0].cells
-    hdr_cells[0].text = 'תוכן'
+    hdr_cells[0].text = 'ערך'
     hdr_cells[1].text = 'שדה'
-
+    
+    # הוספת הנתונים לטבלה
     for key, value in data.items():
         row_cells = table.add_row().cells
-        clean_key = key.replace("_", " ").title()
+        # המרה למחרוזת וטיפול בעברית
+        clean_key = str(key).replace("_", " ").title()
+        val_str = str(value) if value is not None else ""
+        
         row_cells[1].text = clean_key
-        row_cells[0].text = str(value) if value else "לא צוין"
-
-    buffer = BytesIO()
-    doc.save(buffer)
-    buffer.seek(0)
-    return buffer
-
-def fill_template(template_file, data):
-    """
-    לוקח קובץ תבנית וממלא אותו בנתונים.
-    מחפש מחרוזות בפורמט {{key}} ומחליף ב-value.
-    """
-    doc = Document(template_file)
-    
-    # פונקציית עזר להחלפה בתוך פסקה
-    def replace_text_in_paragraph(paragraph, key, value):
-        if key in paragraph.text:
-            # שיטה פשוטה להחלפה (שומרת על עיצוב בסיסי)
-            paragraph.text = paragraph.text.replace(key, str(value) if value else "")
-
-    # הכנת המפתחות להחלפה (למשל: {{Client Name}})
-    replacements = {f"{{{{{key}}}}}": value for key, value in data.items()}
-
-    # 1. מעבר על פסקאות רגילות
-    for paragraph in doc.paragraphs:
-        for placeholder, value in replacements.items():
-            replace_text_in_paragraph(paragraph, placeholder, value)
-
-    # 2. מעבר על טבלאות (חשוב מאוד לטפסים משפטיים)
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for paragraph in cell.paragraphs:
-                    for placeholder, value in replacements.items():
-                        replace_text_in_paragraph(paragraph, placeholder, value)
+        row_cells[0].text = val_str
 
     buffer = BytesIO()
     doc.save(buffer)
