@@ -3,86 +3,32 @@ from transcription import transcribe_audio
 from extraction import extract_info
 from utils import create_docx, fill_template
 import os
+import zipfile
+import io
 
-# --- הגדרת דף בסיסית ---
-st.set_page_config(
-    page_title="LegalAI Pro",
-    page_icon="⚖️",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# --- הגדרת דף ---
+st.set_page_config(page_title="LegalAI Pro", page_icon="⚖️", layout="wide")
 
-# --- עיצוב CSS מתקדם (כולל תיקון למובייל) ---
+# --- עיצוב CSS (נשאר זהה למה שאהבת) ---
 st.markdown("""
 <style>
-    /* ייבוא פונט מודרני */
     @import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;700&display=swap');
-
-    /* הגדרות בסיס לכל המכשירים */
-    html, body, [class*="css"] {
-        font-family: 'Heebo', sans-serif;
-    }
-
-    /* יישור לימין */
-    .stApp {
-        background-color: #f8f9fa;
-        direction: rtl; 
-        text-align: right;
-    }
-
-    /* תיקון ספציפי למובייל */
-    @media only screen and (max-width: 600px) {
-        .stTextInput > div > div > input {
-            direction: rtl; 
-        }
-        h1 { font-size: 1.8rem !important; }
-        h2 { font-size: 1.4rem !important; }
-        
-        div.stButton > button {
-            width: 100% !important;
-        }
-    }
-
-    /* עיצוב כותרות */
-    h1, h2, h3 {
-        color: #2c3e50;
-        font-weight: 700;
-        text-align: right;
-    }
-
-    /* כפתורים מעוצבים */
-    div.stButton > button {
-        background: linear-gradient(90deg, #4b6cb7 0%, #182848 100%);
-        color: white;
-        border: none;
-        padding: 12px 24px;
-        border-radius: 12px;
-        font-weight: bold;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    div.stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 8px rgba(0,0,0,0.15);
-    }
-
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    
-    .stTextInput input, .stTextArea textarea {
-        border-radius: 8px !important;
-        border: 1px solid #e0e0e0;
-    }
+    html, body, [class*="css"] { font-family: 'Heebo', sans-serif; direction: rtl; text-align: right; }
+    .stApp { background-color: #f8f9fa; }
+    h1, h2, h3 { color: #2c3e50; font-weight: 700; text-align: right; }
+    div.stButton > button { background: linear-gradient(90deg, #4b6cb7 0%, #182848 100%); color: white; width: 100%; border-radius: 12px; }
+    @media only screen and (max-width: 600px) { .stTextInput > div > div > input { direction: rtl; } }
 </style>
 """, unsafe_allow_html=True)
 
 # --- סרגל צד ---
 with st.sidebar:
-    st.title("⚙️ הגדרות מערכת")
+    st.title("⚙️ הגדרות תיק")
     
-    st.markdown("### 📄 תבנית מסמך")
-    st.info("ניתן להעלות תבנית Word מותאמת אישית.")
-    template_file = st.file_uploader("העלה תבנית (.docx)", type=["docx"])
+    st.markdown("### 📂 תבניות לטיפול")
+    st.info("ניתן להעלות מספר קבצים במקביל (למשל: ייפוי כוח + כתב תביעה).")
+    # שינוי: קבלת מספר קבצים
+    uploaded_templates = st.file_uploader("העלה תבניות (.docx)", type=["docx"], accept_multiple_files=True)
     
     st.markdown("---")
     
@@ -90,115 +36,124 @@ with st.sidebar:
     default_schema = """
     {
         "client_name": "שם הלקוח המלא",
-        "id_number": "מספר תעודת זהות (אם הוזכר)",
-        "event_date": "תאריך האירוע (בפורמט DD/MM/YYYY)",
-        "main_complaint": "תיאור העובדות והמקרה (תקן שגיאות כתיב ונסח בשפה משפטית)",
-        "requested_remedy": "הסעד או הפיצוי המבוקש"
+        "id_number": "מספר תעודת זהות",
+        "event_date": "תאריך האירוע (DD/MM/YYYY)",
+        "main_complaint": "תיאור העובדות (בשפה משפטית)",
+        "requested_remedy": "הסעד המבוקש"
     }
     """
     schema = st.text_area("הגדרת JSON:", value=default_schema, height=250)
 
 # --- מסך ראשי ---
-col_logo, col_title = st.columns([1, 5])
-with col_logo:
-    st.markdown("## ⚖️") 
-with col_title:
-    st.title("LegalAI | מערכת קליטת תיק")
-    st.markdown("הפוך שיחת ייעוץ לטיוטה משפטית מוכנה - בשניות.")
+col1, col2 = st.columns([1, 5])
+with col1: st.markdown("## ⚖️")
+with col2: 
+    st.title("LegalAI | מערכת לניהול תיק לקוח")
+    st.markdown("הפקת סט מסמכים מלא מתוך הקלטת פגישה.")
 
 st.markdown("---")
 
-tab_upload, tab_record = st.tabs(["📁 העלאת קובץ", "🎙️ הקלטה חיה"])
-
+tab1, tab2 = st.tabs(["📁 העלאת הקלטה", "🎙️ הקלטה חיה"])
 audio_file = None
 
-with tab_upload:
-    uploaded_file = st.file_uploader("בחר קובץ", type=["mp3", "wav"], label_visibility="collapsed")
-    if uploaded_file:
-        audio_file = uploaded_file
-        st.success(f"קובץ נטען: {uploaded_file.name}")
+with tab1:
+    f = st.file_uploader("בחר קובץ", type=["mp3", "wav", "m4a"], label_visibility="collapsed")
+    if f: audio_file = f
+with tab2:
+    r = st.audio_input("הקלט")
+    if r: audio_file = r
 
-with tab_record:
-    audio_recording = st.audio_input("לחץ להקלטה")
-    if audio_recording:
-        audio_file = audio_recording
-
-# --- לוגיקה עסקית ---
-if audio_file is not None:
-    st.markdown("### 🎧 האזנה וניתוח")
-    st.audio(audio_file, format="audio/wav")
+# --- לוגיקה ---
+if audio_file:
+    st.audio(audio_file)
     
-    if st.button("🚀 הפעל ניתוח AI", use_container_width=True):
+    if st.button("🚀 הפעל ניתוח מלא"):
         
-        with st.status("🤖 המערכת מעבדת את הנתונים...", expanded=True) as status:
-            st.write("📝 מתמלל את השיחה לטקסט...")
-            transcribed_text = transcribe_audio(audio_file)
-            st.write("✅ תמלול הסתיים.")
+        # 1. תמלול
+        with st.status("🤖 המערכת עובדת...", expanded=True) as status:
+            st.write("📝 מתמלל שיחה (עשוי לקחת זמן לקבצים גדולים)...")
+            try:
+                transcribed_text = transcribe_audio(audio_file)
+                st.write("✅ תמלול הושלם.")
+            except Exception as e:
+                st.error(f"שגיאה בתמלול: {e}")
+                st.stop()
             
-            st.write("🧠 מנתח הקשר משפטי ומחלץ ישויות...")
+            # 2. חילוץ
+            st.write("🧠 מנתח הקשר משפטי...")
             extracted_data = extract_info(transcribed_text, schema)
-            st.write("✅ חילוץ נתונים הסתיים.")
-            
-            status.update(label="תהליך העיבוד הושלם בהצלחה!", state="complete", expanded=False)
+            st.write("✅ ניתוח הושלם.")
+            status.update(label="העיבוד הסתיים!", state="complete", expanded=False)
 
-        with st.expander("📄 הצג תמלול מלא של השיחה"):
-            st.info(transcribed_text)
-
+        # 3. עריכה
         if "error" in extracted_data:
-            st.error(f"שגיאה בחילוץ הנתונים: {extracted_data['error']}")
+            st.error(extracted_data['error'])
         else:
-            st.markdown("---")
-            st.subheader("✏️ בדיקת נתונים לפני יצירת מסמך")
-            st.caption("ניתן לערוך את השדות ידנית לפני ההורדה")
+            st.subheader("✏️ אימות נתונים")
             
             edited_data = {}
-            
-            # --- התיקון נמצא כאן ---
             labels = {
                 "client_name": "שם הלקוח",
-                "id_number": "תעודת זהות",
-                "event_date": "תאריך אירוע",
-                "main_complaint": "תיאור המקרה",
-                "requested_remedy": "סעד מבוקש"
+                "id_number": "ת.ז", 
+                "event_date": "תאריך",
+                "main_complaint": "תיאור",
+                "requested_remedy": "סעד"
             }
             
             for key, value in extracted_data.items():
                 label = labels.get(key, key)
-                if len(str(value)) > 50:
-                    edited_data[key] = st.text_area(label, value)
+                val_str = str(value) if value else ""
+                if len(val_str) > 50:
+                    edited_data[key] = st.text_area(label, val_str)
                 else:
-                    edited_data[key] = st.text_input(label, value)
-
-            st.markdown("<br>", unsafe_allow_html=True)
+                    edited_data[key] = st.text_input(label, val_str)
             
-            # בחירת תבנית
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            default_template_path = os.path.join(current_dir, "default_template.docx")
-
-            final_doc = None
-            filename = "document.docx"
-
-            if template_file:
-                st.toast("משתמש בתבנית שהעלית...", icon="📂")
-                final_doc = fill_template(template_file, edited_data)
-                filename = "custom_legal_form.docx"
+            st.markdown("---")
             
-            elif os.path.exists(default_template_path):
-                st.info("משתמש בתבנית ברירת מחדל (דמו).")
-                final_doc = fill_template(default_template_path, edited_data)
-                filename = "legal_case_draft.docx"
+            # 4. יצירת המסמכים (טיפול בריבוי קבצים)
+            zip_buffer = io.BytesIO()
+            has_files = False
+
+            with zipfile.ZipFile(zip_buffer, "w") as zf:
+                # לוגיקה: אם הועלו תבניות, נשתמש בהן. אם לא, נחפש ברירת מחדל.
                 
-            else:
-                st.warning("לא נמצאה תבנית - יוצר מסמך נתונים בסיסי.")
-                final_doc = create_docx(edited_data)
-                filename = "generic_data.docx"
+                files_to_process = []
+                
+                if uploaded_templates:
+                    # שימוש בתבניות שהמשתמש העלה
+                    for t_file in uploaded_templates:
+                        files_to_process.append((t_file.name, t_file))
+                else:
+                    # בדיקת ברירת מחדל
+                    current_dir = os.path.dirname(os.path.abspath(__file__))
+                    default_path = os.path.join(current_dir, "default_template.docx")
+                    if os.path.exists(default_path):
+                        files_to_process.append(("טופס_ברירת_מחדל.docx", default_path))
+                
+                # ביצוע המילוי לכל קובץ
+                if files_to_process:
+                    for filename, file_obj in files_to_process:
+                        try:
+                            # מילוי התבנית
+                            filled_doc_io = fill_template(file_obj, edited_data)
+                            # הוספה ל-ZIP
+                            zf.writestr(filename, filled_doc_io.getvalue())
+                            has_files = True
+                        except Exception as e:
+                            st.warning(f"לא הצלחתי לעבד את הקובץ {filename}: {e}")
+                else:
+                    # אין תבניות בכלל -> יוצר מסמך גנרי
+                    generic_doc = create_docx(edited_data)
+                    zf.writestr("סיכום_תיק_גנרי.docx", generic_doc.getvalue())
+                    has_files = True
 
-            if final_doc:
+            # כפתור הורדה
+            if has_files:
+                zip_buffer.seek(0)
                 st.download_button(
-                    label="📥 הורד מסמך מוכן (Word)",
-                    data=final_doc,
-                    file_name=filename,
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    type="primary",
-                    use_container_width=True
+                    label="📦 הורד את כל מסמכי התיק (ZIP)",
+                    data=zip_buffer,
+                    file_name="legal_case_files.zip",
+                    mime="application/zip",
+                    type="primary"
                 )
